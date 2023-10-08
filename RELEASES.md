@@ -2,12 +2,26 @@
 
 ## Unreleased
 
+### Bugs
+
+- Fixed system order ambiguity between bevy_ui and update_action_state systems
+- The input values of axis inputs in a `Chord` are now prioritized over buttons
+- Fixed unassigned `InputMaps`s not receiving input from all connected gamepads
+
 ### Docs
 
 - Fixed invalid example code in README
+- Added example for setting default controls
+- Added example for registering gamepads in a local multiplayer fashion
 
 ### Enhancements
+
 - Added `DeadZoneShape` for `DualAxis` which allows for different deadzones shapes: cross, rectangle, and ellipse.
+- Added sensitivity for `SingleAxis` and `DualAxis`, allowing you to scale mouse, keypad and gamepad inputs differently for each action.
+
+### Usability
+
+- Added `block_ui_interactions` feature flag; when on, mouse input won't be read if any `bevy_ui` element has an active `Interaction`.
 
 ## Version 0.10
 

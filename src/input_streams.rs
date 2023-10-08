@@ -21,7 +21,7 @@ use crate::user_input::{InputKind, UserInput};
 
 /// A collection of [`Input`] structs, which can be used to update an [`InputMap`](crate::input_map::InputMap).
 ///
-/// These are typically collected via a system from the [`World`](bevy::prelude::World) as resources.
+/// These are typically collected via a system from the [`World`] as resources.
 #[derive(Debug, Clone)]
 pub struct InputStreams<'a> {
     /// A [`GamepadButton`] [`Input`] stream
@@ -77,17 +77,6 @@ impl<'a> InputStreams<'a> {
 
 // Input checking
 impl<'a> InputStreams<'a> {
-    /// Guess which registered [`Gamepad`] should be used.
-    ///
-    /// If an associated gamepad is set, use that.
-    /// Otherwise use the first registered gamepad, if any.
-    pub fn guess_gamepad(&self) -> Option<Gamepad> {
-        match self.associated_gamepad {
-            Some(gamepad) => Some(gamepad),
-            None => self.gamepads.iter().next(),
-        }
-    }
-
     /// Is the `input` matched by the [`InputStreams`]?
     pub fn input_pressed(&self, input: &UserInput) -> bool {
         match input {
@@ -142,12 +131,23 @@ impl<'a> InputStreams<'a> {
                 value < axis.negative_low || value > axis.positive_low
             }
             InputKind::GamepadButton(gamepad_button) => {
-                if let Some(gamepad) = self.guess_gamepad() {
+                if let Some(gamepad) = self.associated_gamepad {
                     self.gamepad_buttons.pressed(GamepadButton {
                         gamepad,
                         button_type: gamepad_button,
                     })
                 } else {
+                    for gamepad in self.gamepads.iter() {
+                        if self.gamepad_buttons.pressed(GamepadButton {
+                            gamepad,
+                            button_type: gamepad_button,
+                        }) {
+                            // Return early if *any* gamepad is pressing this button
+                            return true;
+                        }
+                    }
+
+                    // If we don't have the required data, fall back to false
                     false
                 }
             }
@@ -266,9 +266,9 @@ impl<'a> InputStreams<'a> {
             if value >= axis.negative_low && value <= axis.positive_low && include_deadzone {
                 0.0
             } else if axis.inverted {
-                -value
+                -value * axis.sensitivity
             } else {
-                value
+                value * axis.sensitivity
             }
         };
 
@@ -276,7 +276,7 @@ impl<'a> InputStreams<'a> {
             UserInput::Single(InputKind::SingleAxis(single_axis)) => {
                 match single_axis.axis_type {
                     AxisType::Gamepad(axis_type) => {
-                        if let Some(gamepad) = self.guess_gamepad() {
+                        if let Some(gamepad) = self.associated_gamepad {
                             let value = self
                                 .gamepad_axes
                                 .get(GamepadAxis { gamepad, axis_type })
@@ -284,6 +284,19 @@ impl<'a> InputStreams<'a> {
 
                             value_in_axis_range(single_axis, value)
                         } else {
+                            for gamepad in self.gamepads.iter() {
+                                let value = self
+                                    .gamepad_axes
+                                    .get(GamepadAxis { gamepad, axis_type })
+                                    .unwrap_or_default();
+
+                                // Return early if *any* gamepad is pressing this axis
+                                if value != 0.0 {
+                                    return value_in_axis_range(single_axis, value);
+                                }
+                            }
+
+                            // If we don't have the required data, fall back to 0.0
                             0.0
                         }
                     }
@@ -330,9 +343,41 @@ impl<'a> InputStreams<'a> {
             UserInput::VirtualDPad { .. } => {
                 self.input_axis_pair(input).unwrap_or_default().length()
             }
+            UserInput::Chord(inputs) => {
+                let mut value = 0.0;
+                let mut has_axis = false;
+
+                // Prioritize axis over button input values
+                for input in inputs.iter() {
+                    value += match input {
+                        InputKind::SingleAxis(axis) => {
+                            has_axis = true;
+                            self.input_value(&UserInput::Single(InputKind::SingleAxis(*axis)), true)
+                        }
+                        InputKind::MouseWheel(axis) => {
+                            has_axis = true;
+                            self.input_value(&UserInput::Single(InputKind::MouseWheel(*axis)), true)
+                        }
+                        InputKind::MouseMotion(axis) => {
+                            has_axis = true;
+                            self.input_value(
+                                &UserInput::Single(InputKind::MouseMotion(*axis)),
+                                true,
+                            )
+                        }
+                        _ => 0.0,
+                    }
+                }
+
+                if has_axis {
+                    return value;
+                }
+
+                use_button_value()
+            }
             // This is required because upstream bevy::input still waffles about whether triggers are buttons or axes
             UserInput::Single(InputKind::GamepadButton(button_type)) => {
-                if let Some(gamepad) = self.guess_gamepad() {
+                if let Some(gamepad) = self.associated_gamepad {
                     // Get the value from the registered gamepad
                     self.gamepad_button_axes
                         .get(GamepadButton {
@@ -341,6 +386,22 @@ impl<'a> InputStreams<'a> {
                         })
                         .unwrap_or_else(use_button_value)
                 } else {
+                    for gamepad in self.gamepads.iter() {
+                        let value = self
+                            .gamepad_button_axes
+                            .get(GamepadButton {
+                                gamepad,
+                                button_type: *button_type,
+                            })
+                            .unwrap_or_else(use_button_value);
+
+                        // Return early if *any* gamepad is pressing this button
+                        if value != 0.0 {
+                            return value;
+                        }
+                    }
+
+                    // If we don't have the required data, fall back to 0.0
                     0.0
                 }
             }
@@ -352,7 +413,7 @@ impl<'a> InputStreams<'a> {
     ///
     /// If `input` is a chord, returns result of the first dual axis in the chord.
 
-    /// If `input` is not a [`DualAxis`](crate::axislike::DualAxis) or [`VirtualDPad`], returns [`None`].
+    /// If `input` is not a [`DualAxis`] or [`VirtualDPad`], returns [`None`].
     ///
     /// # Warning
     ///
@@ -409,7 +470,7 @@ impl<'a> InputStreams<'a> {
 
 /// A mutable collection of [`Input`] structs, which can be used for mocking user inputs.
 ///
-/// These are typically collected via a system from the [`World`](bevy::prelude::World) as resources.
+/// These are typically collected via a system from the [`World`] as resources.
 // WARNING: If you update the fields of this type, you must also remember to update `InputMocking::reset_inputs`.
 #[derive(Debug)]
 pub struct MutableInputStreams<'a> {
