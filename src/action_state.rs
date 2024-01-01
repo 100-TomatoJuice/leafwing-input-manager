@@ -4,6 +4,7 @@ use crate::Actionlike;
 use crate::{axislike::DualAxisData, buttonlike::ButtonState};
 
 use bevy::ecs::{component::Component, entity::Entity};
+use bevy::math::Vec2;
 use bevy::prelude::{Event, Resource};
 use bevy::reflect::Reflect;
 use bevy::utils::hashbrown::hash_set::Iter;
@@ -47,7 +48,7 @@ pub struct ActionData {
 /// use leafwing_input_manager::prelude::*;
 /// use bevy::utils::Instant;
 ///
-/// #[derive(Actionlike, PartialEq, Eq, Clone, Copy, Debug, Reflect)]
+/// #[derive(Actionlike, PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect)]
 /// enum Action {
 ///     Left,
 ///     Right,
@@ -127,7 +128,7 @@ impl<A: Actionlike> ActionState<A> {
     /// use leafwing_input_manager::buttonlike::ButtonState;
     /// use bevy::utils::Instant;
     ///
-    /// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+    /// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
     /// enum Action {
     ///     Run,
     ///     Jump,
@@ -180,7 +181,7 @@ impl<A: Actionlike> ActionState<A> {
     /// use bevy::prelude::Reflect;
     /// use leafwing_input_manager::prelude::*;
     ///
-    /// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+    /// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
     /// enum Action {
     ///     Run,
     ///     Jump,
@@ -206,7 +207,7 @@ impl<A: Actionlike> ActionState<A> {
     /// use bevy::prelude::Reflect;
     /// use leafwing_input_manager::prelude::*;
     ///
-    /// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+    /// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
     /// enum Action {
     ///     Run,
     ///     Jump,
@@ -294,13 +295,13 @@ impl<A: Actionlike> ActionState<A> {
     /// use bevy::prelude::Reflect;
     /// use leafwing_input_manager::prelude::*;
     ///
-    /// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+    /// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
     /// enum AbilitySlot {
     ///     Slot1,
     ///     Slot2,
     /// }
     ///
-    /// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+    /// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
     /// enum Action {
     ///     Run,
     ///     Jump,
@@ -372,7 +373,7 @@ impl<A: Actionlike> ActionState<A> {
     /// use bevy::prelude::Reflect;
     /// use leafwing_input_manager::prelude::*;
     ///
-    /// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+    /// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
     /// enum Action {
     ///     Eat,
     ///     Sleep,
@@ -522,7 +523,7 @@ impl<A: Actionlike> Default for ActionState<A> {
 /// use bevy::prelude::*;
 /// use leafwing_input_manager::prelude::*;
 ///
-/// #[derive(Actionlike, Clone, Copy, Reflect)]
+/// #[derive(Actionlike, PartialEq, Eq, Hash, Clone, Copy, Reflect)]
 /// enum DanceDance {
 ///     Left,
 ///     Right,
@@ -551,7 +552,7 @@ impl<A: Actionlike> Default for ActionState<A> {
 /// although this should be reserved for cases where the entity whose value you want to check
 /// is distinct from the entity whose [`ActionState`] you want to set.
 /// Check the source code of [`update_action_state_from_interaction`](crate::systems::update_action_state_from_interaction) for an example of how this is done.
-#[derive(Component, Clone, PartialEq, Eq)]
+#[derive(Debug, Component, Clone, PartialEq, Eq)]
 pub struct ActionStateDriver<A: Actionlike> {
     /// The action triggered by this entity
     pub action: A,
@@ -560,7 +561,7 @@ pub struct ActionStateDriver<A: Actionlike> {
 }
 
 /// Represents the entities that an ``ActionStateDriver`` targets.
-#[derive(Component, Clone, PartialEq, Eq)]
+#[derive(Debug, Component, Clone, PartialEq, Eq)]
 pub enum ActionStateDriverTarget {
     /// No targets
     None,
@@ -758,7 +759,7 @@ impl Timing {
 ///
 /// `ID` should be a component type that stores a unique stable identifier for the entity
 /// that stores the corresponding [`ActionState`].
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Event)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Event)]
 pub enum ActionDiff<A: Actionlike, ID: Eq + Clone + Component> {
     /// The action was pressed
     Pressed {
@@ -774,6 +775,24 @@ pub enum ActionDiff<A: Actionlike, ID: Eq + Clone + Component> {
         /// The stable identifier of the entity
         id: ID,
     },
+    /// The value of the action changed
+    ValueChanged {
+        /// The value of the action
+        action: A,
+        /// The stable identifier of the entity
+        id: ID,
+        /// The new value of the action
+        value: f32,
+    },
+    /// The axis pair of the action changed
+    AxisPairChanged {
+        /// The value of the action
+        action: A,
+        /// The stable identifier of the entity
+        id: ID,
+        /// The new value of the axis
+        axis_pair: Vec2,
+    },
 }
 
 #[cfg(test)]
@@ -785,7 +804,7 @@ mod tests {
 
     use super::ActionStateDriverTarget;
 
-    #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+    #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
     enum Action {
         Run,
         Jump,

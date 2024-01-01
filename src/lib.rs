@@ -6,7 +6,8 @@
 use crate::action_state::ActionState;
 use crate::input_map::InputMap;
 use bevy::ecs::prelude::*;
-use bevy::reflect::TypePath;
+use bevy::reflect::{FromReflect, Reflect, TypePath};
+use std::hash::Hash;
 use std::marker::PhantomData;
 
 pub mod action_state;
@@ -39,7 +40,9 @@ pub mod prelude {
     pub use crate::buttonlike::MouseWheelDirection;
     pub use crate::clashing_inputs::ClashStrategy;
     pub use crate::input_map::InputMap;
-    pub use crate::input_mocking::MockInput;
+    #[cfg(feature = "ui")]
+    pub use crate::input_mocking::MockUIInteraction;
+    pub use crate::input_mocking::{MockInput, QueryInput};
     pub use crate::scan_codes::QwertyScanCode;
     pub use crate::user_input::{Modifier, UserInput};
 
@@ -80,7 +83,9 @@ pub mod prelude {
 ///    Ultimate,
 /// }
 /// ```
-pub trait Actionlike: Send + Sync + Clone + TypePath + 'static {
+pub trait Actionlike:
+    Eq + Hash + Send + Sync + Clone + Hash + Reflect + TypePath + FromReflect + 'static
+{
     /// The number of variants of this action type
     fn n_variants() -> usize;
 
