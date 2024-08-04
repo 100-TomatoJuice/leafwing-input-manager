@@ -23,7 +23,7 @@ fn main() {
             PreUpdate,
             copy_action_state.after(InputManagerSystem::ManualControl),
         )
-        // Try it out, using QWER / left click / right click!
+        // Try it out, using QWER / left-click / right-click!
         .add_systems(Update, report_abilities_used)
         .run();
 }
@@ -36,6 +36,16 @@ enum Slot {
     Ability2,
     Ability3,
     Ability4,
+}
+
+impl Slot {
+    /// You could use the `strum` crate to derive this automatically!
+    fn variants() -> impl Iterator<Item = Slot> {
+        use Slot::*;
+        [Primary, Secondary, Ability1, Ability2, Ability3, Ability4]
+            .iter()
+            .copied()
+    }
 }
 
 // The list of possible abilities is typically longer than the list of slots
@@ -86,14 +96,13 @@ fn spawn_player(mut commands: Commands) {
     commands.spawn(PlayerBundle {
         player: Player,
         slot_input_map: InputMap::new([
-            (Q, Slot::Ability1),
-            (W, Slot::Ability2),
-            (E, Slot::Ability3),
-            (R, Slot::Ability4),
+            (Slot::Ability1, KeyQ),
+            (Slot::Ability2, KeyW),
+            (Slot::Ability3, KeyE),
+            (Slot::Ability4, KeyR),
         ])
-        .insert(MouseButton::Left, Slot::Primary)
-        .insert(MouseButton::Right, Slot::Secondary)
-        .build(),
+        .with(Slot::Primary, MouseButton::Left)
+        .with(Slot::Secondary, MouseButton::Right),
         slot_action_state: ActionState::default(),
         ability_action_state: ActionState::default(),
         ability_slot_map,
@@ -102,18 +111,20 @@ fn spawn_player(mut commands: Commands) {
 
 fn copy_action_state(
     mut query: Query<(
-        &ActionState<Slot>,
+        &mut ActionState<Slot>,
         &mut ActionState<Ability>,
         &AbilitySlotMap,
     )>,
 ) {
-    for (slot_state, mut ability_state, ability_slot_map) in query.iter_mut() {
+    for (mut slot_state, mut ability_state, ability_slot_map) in query.iter_mut() {
         for slot in Slot::variants() {
-            if let Some(&matching_ability) = ability_slot_map.get(&slot) {
+            if let Some(matching_ability) = ability_slot_map.get(&slot) {
                 // This copies the `ActionData` between the ActionStates,
                 // including information about how long the buttons have been pressed or released
-                ability_state
-                    .set_action_data(matching_ability, slot_state.action_data(slot).clone());
+                ability_state.set_button_data(
+                    *matching_ability,
+                    slot_state.button_data_mut_or_default(&slot).clone(),
+                );
             }
         }
     }

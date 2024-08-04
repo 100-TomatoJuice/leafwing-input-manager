@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
-use leafwing_input_manager::{errors::NearlySingularConversion, orientation::Direction};
 
 fn main() {
     App::new()
@@ -44,12 +43,12 @@ impl ArpgAction {
         ArpgAction::Right,
     ];
 
-    fn direction(self) -> Option<Direction> {
+    fn direction(self) -> Option<Dir2> {
         match self {
-            ArpgAction::Up => Some(Direction::NORTH),
-            ArpgAction::Down => Some(Direction::SOUTH),
-            ArpgAction::Left => Some(Direction::WEST),
-            ArpgAction::Right => Some(Direction::EAST),
+            ArpgAction::Up => Some(Dir2::Y),
+            ArpgAction::Down => Some(Dir2::NEG_Y),
+            ArpgAction::Left => Some(Dir2::NEG_X),
+            ArpgAction::Right => Some(Dir2::X),
             _ => None,
         }
     }
@@ -74,35 +73,35 @@ impl PlayerBundle {
         let mut input_map = InputMap::default();
 
         // Movement
-        input_map.insert(KeyCode::Up, Up);
-        input_map.insert(GamepadButtonType::DPadUp, Up);
+        input_map.insert(Up, KeyCode::ArrowUp);
+        input_map.insert(Up, GamepadButtonType::DPadUp);
 
-        input_map.insert(KeyCode::Down, Down);
-        input_map.insert(GamepadButtonType::DPadDown, Down);
+        input_map.insert(Down, KeyCode::ArrowDown);
+        input_map.insert(Down, GamepadButtonType::DPadDown);
 
-        input_map.insert(KeyCode::Left, Left);
-        input_map.insert(GamepadButtonType::DPadLeft, Left);
+        input_map.insert(Left, KeyCode::ArrowLeft);
+        input_map.insert(Left, GamepadButtonType::DPadLeft);
 
-        input_map.insert(KeyCode::Right, Right);
-        input_map.insert(GamepadButtonType::DPadRight, Right);
+        input_map.insert(Right, KeyCode::ArrowRight);
+        input_map.insert(Right, GamepadButtonType::DPadRight);
 
         // Abilities
-        input_map.insert(KeyCode::Q, Ability1);
-        input_map.insert(GamepadButtonType::West, Ability1);
-        input_map.insert(MouseButton::Left, Ability1);
+        input_map.insert(Ability1, KeyCode::KeyQ);
+        input_map.insert(Ability1, GamepadButtonType::West);
+        input_map.insert(Ability1, MouseButton::Left);
 
-        input_map.insert(KeyCode::W, Ability2);
-        input_map.insert(GamepadButtonType::North, Ability2);
-        input_map.insert(MouseButton::Right, Ability2);
+        input_map.insert(Ability2, KeyCode::KeyW);
+        input_map.insert(Ability2, GamepadButtonType::North);
+        input_map.insert(Ability2, MouseButton::Right);
 
-        input_map.insert(KeyCode::E, Ability3);
-        input_map.insert(GamepadButtonType::East, Ability3);
+        input_map.insert(Ability3, KeyCode::KeyE);
+        input_map.insert(Ability3, GamepadButtonType::East);
 
-        input_map.insert(KeyCode::Space, Ability4);
-        input_map.insert(GamepadButtonType::South, Ability4);
+        input_map.insert(Ability4, KeyCode::Space);
+        input_map.insert(Ability4, GamepadButtonType::South);
 
-        input_map.insert(KeyCode::R, Ultimate);
-        input_map.insert(GamepadButtonType::LeftTrigger2, Ultimate);
+        input_map.insert(Ultimate, KeyCode::KeyR);
+        input_map.insert(Ultimate, GamepadButtonType::LeftTrigger2);
 
         input_map
     }
@@ -111,17 +110,14 @@ impl PlayerBundle {
 fn spawn_player(mut commands: Commands) {
     commands.spawn(PlayerBundle {
         player: Player,
-        input_manager: InputManagerBundle {
-            input_map: PlayerBundle::default_input_map(),
-            ..default()
-        },
+        input_manager: InputManagerBundle::with_map(PlayerBundle::default_input_map()),
     });
 }
 
 fn cast_fireball(query: Query<&ActionState<ArpgAction>, With<Player>>) {
     let action_state = query.single();
 
-    if action_state.just_pressed(ArpgAction::Ability1) {
+    if action_state.just_pressed(&ArpgAction::Ability1) {
         println!("Fwoosh!");
     }
 }
@@ -129,21 +125,20 @@ fn cast_fireball(query: Query<&ActionState<ArpgAction>, With<Player>>) {
 fn player_dash(query: Query<&ActionState<ArpgAction>, With<Player>>) {
     let action_state = query.single();
 
-    if action_state.just_pressed(ArpgAction::Ability4) {
+    if action_state.just_pressed(&ArpgAction::Ability4) {
         let mut direction_vector = Vec2::ZERO;
 
         for input_direction in ArpgAction::DIRECTIONS {
-            if action_state.pressed(input_direction) {
+            if action_state.pressed(&input_direction) {
                 if let Some(direction) = input_direction.direction() {
                     // Sum the directions as 2D vectors
-                    direction_vector += Vec2::from(direction);
+                    direction_vector += *direction;
                 }
             }
         }
 
         // Then reconvert at the end, normalizing the magnitude
-        let net_direction: Result<Direction, NearlySingularConversion> =
-            direction_vector.try_into();
+        let net_direction = Dir2::new(direction_vector);
 
         if let Ok(direction) = net_direction {
             println!("Dashing in {direction:?}");
@@ -153,7 +148,7 @@ fn player_dash(query: Query<&ActionState<ArpgAction>, With<Player>>) {
 
 #[derive(Event)]
 pub struct PlayerWalk {
-    pub direction: Direction,
+    pub direction: Dir2,
 }
 
 fn player_walks(
@@ -165,16 +160,16 @@ fn player_walks(
     let mut direction_vector = Vec2::ZERO;
 
     for input_direction in ArpgAction::DIRECTIONS {
-        if action_state.pressed(input_direction) {
+        if action_state.pressed(&input_direction) {
             if let Some(direction) = input_direction.direction() {
                 // Sum the directions as 2D vectors
-                direction_vector += Vec2::from(direction);
+                direction_vector += *direction;
             }
         }
     }
 
     // Then reconvert at the end, normalizing the magnitude
-    let net_direction: Result<Direction, NearlySingularConversion> = direction_vector.try_into();
+    let net_direction = Dir2::new(direction_vector);
 
     if let Ok(direction) = net_direction {
         event_writer.send(PlayerWalk { direction });

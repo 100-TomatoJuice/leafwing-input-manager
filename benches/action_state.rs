@@ -1,11 +1,6 @@
-use bevy::prelude::Reflect;
+use bevy::{prelude::Reflect, utils::HashMap};
 use criterion::{criterion_group, criterion_main, Criterion};
-use leafwing_input_manager::{
-    action_state::{ActionData, Timing},
-    buttonlike::ButtonState,
-    prelude::ActionState,
-    Actionlike,
-};
+use leafwing_input_manager::{input_map::UpdatedActions, prelude::ActionState, Actionlike};
 
 #[derive(Actionlike, Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
 enum TestAction {
@@ -21,23 +16,30 @@ enum TestAction {
     J,
 }
 
+impl TestAction {
+    fn variants() -> impl Iterator<Item = TestAction> {
+        use TestAction::*;
+        [A, B, C, D, E, F, G, H, I, J].iter().copied()
+    }
+}
+
 fn pressed(action_state: &ActionState<TestAction>) -> bool {
-    action_state.pressed(TestAction::A)
+    action_state.pressed(&TestAction::A)
 }
 
 fn just_pressed(action_state: &ActionState<TestAction>) -> bool {
-    action_state.just_pressed(TestAction::A)
+    action_state.just_pressed(&TestAction::A)
 }
 
 fn released(action_state: &ActionState<TestAction>) -> bool {
-    action_state.released(TestAction::A)
+    action_state.released(&TestAction::A)
 }
 
 fn just_released(action_state: &ActionState<TestAction>) -> bool {
-    action_state.just_released(TestAction::A)
+    action_state.just_released(&TestAction::A)
 }
 
-fn update(mut action_state: ActionState<TestAction>, action_data: Vec<ActionData>) {
+fn update(mut action_state: ActionState<TestAction>, action_data: UpdatedActions<TestAction>) {
     action_state.update(action_data);
 }
 
@@ -52,18 +54,17 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("released", |b| b.iter(|| released(&action_state)));
     c.bench_function("just_released", |b| b.iter(|| just_released(&action_state)));
 
-    let action_data: Vec<ActionData> = TestAction::variants()
-        .map(|_action| ActionData {
-            state: ButtonState::JustPressed,
-            value: 0.0,
-            axis_pair: None,
-            timing: Timing::default(),
-            consumed: false,
-        })
+    let button_actions: HashMap<TestAction, bool> = TestAction::variants()
+        .map(|action| (action, true))
         .collect();
 
+    let updated_actions = UpdatedActions {
+        button_actions,
+        ..Default::default()
+    };
+
     c.bench_function("update", |b| {
-        b.iter(|| update(action_state.clone(), action_data.clone()))
+        b.iter(|| update(action_state.clone(), updated_actions.clone()))
     });
 }
 

@@ -25,13 +25,10 @@ enum Action {
 struct Player;
 
 fn spawn_player(mut commands: Commands) {
+    // Describes how to convert from player inputs into those actions
+    let input_map = InputMap::new([(Action::Jump, KeyCode::Space)]);
     commands
-        .spawn(InputManagerBundle::<Action> {
-            // Stores "which actions are currently pressed"
-            action_state: ActionState::default(),
-            // Describes how to convert from player inputs into those actions
-            input_map: InputMap::new([(KeyCode::Space, Action::Jump)]),
-        })
+        .spawn(InputManagerBundle::with_map(input_map))
         .insert(Player);
 }
 
@@ -39,7 +36,7 @@ fn spawn_player(mut commands: Commands) {
 fn jump(query: Query<&ActionState<Action>, With<Player>>) {
     let action_state = query.single();
     // Each action has a button-like state of its own that you can check
-    if action_state.just_pressed(Action::Jump) {
+    if action_state.just_pressed(&Action::Jump) {
         println!("I'm jumping!");
     }
 }

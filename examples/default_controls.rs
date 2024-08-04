@@ -1,7 +1,7 @@
 //! Demonstrates how to create default controls for an `Actionlike` and add it to an `InputMap`
 
 use bevy::prelude::*;
-use leafwing_input_manager::{prelude::*, user_input::InputKind};
+use leafwing_input_manager::prelude::*;
 
 fn main() {
     App::new()
@@ -9,36 +9,41 @@ fn main() {
         .add_plugins(InputManagerPlugin::<PlayerAction>::default())
         .add_systems(Startup, spawn_player)
         .add_systems(Update, use_actions)
-        .run()
+        .run();
 }
 
-#[derive(Actionlike, PartialEq, Eq, Clone, Copy, Hash, Debug, Reflect)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Reflect)]
 enum PlayerAction {
     Run,
     Jump,
     UseItem,
 }
 
-// Exhaustively match `PlayerAction` and define the default binding to the input
-impl PlayerAction {
-    fn default_keyboard_mouse_input(action: PlayerAction) -> UserInput {
-        // Match against the provided action to get the correct default keyboard-mouse input
-        match action {
-            Self::Run => UserInput::VirtualDPad(VirtualDPad::wasd()),
-            Self::Jump => UserInput::Single(InputKind::Keyboard(KeyCode::Space)),
-            Self::UseItem => UserInput::Single(InputKind::Mouse(MouseButton::Left)),
+impl Actionlike for PlayerAction {
+    fn input_control_kind(&self) -> InputControlKind {
+        match self {
+            PlayerAction::Run => InputControlKind::DualAxis,
+            _ => InputControlKind::Button,
         }
     }
+}
 
-    fn default_gamepad_input(action: PlayerAction) -> UserInput {
-        // Match against the provided action to get the correct default gamepad input
-        match action {
-            Self::Run => UserInput::Single(InputKind::DualAxis(DualAxis::left_stick())),
-            Self::Jump => UserInput::Single(InputKind::GamepadButton(GamepadButtonType::South)),
-            Self::UseItem => {
-                UserInput::Single(InputKind::GamepadButton(GamepadButtonType::RightTrigger2))
-            }
-        }
+impl PlayerAction {
+    /// Define the default bindings to the input
+    fn default_input_map() -> InputMap<Self> {
+        let mut input_map = InputMap::default();
+
+        // Default gamepad input bindings
+        input_map.insert_dual_axis(Self::Run, GamepadStick::LEFT);
+        input_map.insert(Self::Jump, GamepadButtonType::South);
+        input_map.insert(Self::UseItem, GamepadButtonType::RightTrigger2);
+
+        // Default kbm input bindings
+        input_map.insert_dual_axis(Self::Run, KeyboardVirtualDPad::WASD);
+        input_map.insert(Self::Jump, KeyCode::Space);
+        input_map.insert(Self::UseItem, MouseButton::Left);
+
+        input_map
     }
 }
 
@@ -46,22 +51,11 @@ impl PlayerAction {
 struct Player;
 
 fn spawn_player(mut commands: Commands) {
-    // Create an `InputMap` to add default inputs to
-    let mut input_map = InputMap::default();
-
-    // Loop through each action in `PlayerAction` and get the default `UserInput`,
-    // then insert each default input into input_map
-    for action in PlayerAction::variants() {
-        input_map.insert(PlayerAction::default_keyboard_mouse_input(action), action);
-        input_map.insert(PlayerAction::default_gamepad_input(action), action);
-    }
-
-    // Spawn the player with the populated input_map
+    // Spawn the player with the default input_map
     commands
-        .spawn(InputManagerBundle::<PlayerAction> {
-            input_map,
-            ..default()
-        })
+        .spawn(InputManagerBundle::with_map(
+            PlayerAction::default_input_map(),
+        ))
         .insert(Player);
 }
 
@@ -69,23 +63,20 @@ fn use_actions(query: Query<&ActionState<PlayerAction>, With<Player>>) {
     let action_state = query.single();
 
     // When the default input for `PlayerAction::Run` is pressed, print the clamped direction of the axis
-    if action_state.pressed(PlayerAction::Run) {
+    if action_state.pressed(&PlayerAction::Run) {
         println!(
             "Moving in direction {}",
-            action_state
-                .clamped_axis_pair(PlayerAction::Run)
-                .unwrap()
-                .xy()
+            action_state.clamped_axis_pair(&PlayerAction::Run).xy()
         );
     }
 
     // When the default input for `PlayerAction::Jump` is pressed, print "Jump!"
-    if action_state.just_pressed(PlayerAction::Jump) {
+    if action_state.just_pressed(&PlayerAction::Jump) {
         println!("Jumped!");
     }
 
     // When the default input for `PlayerAction::UseItem` is pressed, print "Used an Item!"
-    if action_state.just_pressed(PlayerAction::UseItem) {
+    if action_state.just_pressed(&PlayerAction::UseItem) {
         println!("Used an Item!");
     }
 }

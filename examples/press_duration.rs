@@ -47,10 +47,10 @@ impl PlayerBundle {
         use Action::*;
 
         InputMap::new([
-            (KeyCode::A, Left),
-            (KeyCode::Left, Left),
-            (KeyCode::D, Right),
-            (KeyCode::Right, Right),
+            (Left, KeyCode::KeyA),
+            (Left, KeyCode::ArrowLeft),
+            (Right, KeyCode::KeyD),
+            (Right, KeyCode::ArrowRight),
         ])
     }
 }
@@ -59,17 +59,14 @@ fn spawn_player(mut commands: Commands) {
     commands.spawn(PlayerBundle {
         player: Player,
         velocity: Velocity { x: 0.0 },
-        input_manager: InputManagerBundle {
-            input_map: PlayerBundle::default_input_map(),
-            ..default()
-        },
+        input_manager: InputManagerBundle::with_map(PlayerBundle::default_input_map()),
         sprite: SpriteBundle {
             transform: Transform {
                 scale: Vec3::new(40.0, 80.0, 0.0),
                 ..Default::default()
             },
             sprite: Sprite {
-                color: Color::rgb(0.5, 0.5, 1.0),
+                color: Color::srgb(0.5, 0.5, 1.0),
                 ..Default::default()
             },
             ..Default::default()
@@ -87,14 +84,14 @@ fn hold_dash(mut player_query: Query<(&ActionState<Action>, &mut Velocity), With
 
     let (action_state, mut velocity) = player_query.single_mut();
 
-    if action_state.just_released(Action::Left) {
+    if action_state.just_released(&Action::Left) {
         // Accelerate left
-        velocity.x -= VELOCITY_RATIO * action_state.previous_duration(Action::Left).as_secs_f32();
+        velocity.x -= VELOCITY_RATIO * action_state.previous_duration(&Action::Left).as_secs_f32();
     }
 
-    if action_state.just_released(Action::Right) {
+    if action_state.just_released(&Action::Right) {
         // Accelerate right
-        velocity.x += VELOCITY_RATIO * action_state.previous_duration(Action::Right).as_secs_f32();
+        velocity.x += VELOCITY_RATIO * action_state.previous_duration(&Action::Right).as_secs_f32();
     }
 }
 

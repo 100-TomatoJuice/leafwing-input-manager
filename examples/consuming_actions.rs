@@ -1,6 +1,5 @@
 //! Demonstrates how to "consume" actions, so they can only be responded to by a single system
 
-use bevy::ecs::system::Resource;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
 
@@ -12,21 +11,21 @@ fn main() {
         .add_plugins(InputManagerPlugin::<MenuAction>::default())
         .init_resource::<ActionState<MenuAction>>()
         .insert_resource(InputMap::<MenuAction>::new([
-            (KeyCode::Escape, MenuAction::CloseWindow),
-            (KeyCode::M, MenuAction::OpenMainMenu),
-            (KeyCode::S, MenuAction::OpenSubMenu),
+            (MenuAction::CloseWindow, KeyCode::Escape),
+            (MenuAction::OpenMainMenu, KeyCode::KeyM),
+            (MenuAction::OpenSubMenu, KeyCode::KeyS),
         ]))
         .init_resource::<MainMenu>()
         .init_resource::<SubMenu>()
         .add_systems(Update, report_menus)
         .add_systems(Update, open_main_menu)
         .add_systems(Update, open_sub_menu)
-        // We want to ensure that if both the main menu and submenu are open
+        // We want to ensure that if both the main menu and submenu are open,
         // only the submenu is closed if the user hits (or holds) Escape
         .add_systems(Update, close_menu::<SubMenu>.before(close_menu::<MainMenu>))
         // We can do this by ordering our systems and using `ActionState::consume`
         .add_systems(Update, close_menu::<MainMenu>)
-        .run()
+        .run();
 }
 
 #[derive(Actionlike, Debug, Clone, Reflect, PartialEq, Eq, Hash)]
@@ -56,36 +55,38 @@ fn report_menus(main_menu: Res<MainMenu>, submenu: Res<SubMenu>) {
 }
 
 fn open_main_menu(action_state: Res<ActionState<MenuAction>>, mut menu_state: ResMut<MainMenu>) {
-    if action_state.just_pressed(MenuAction::OpenMainMenu) && !menu_state.is_open() {
+    if action_state.just_pressed(&MenuAction::OpenMainMenu) && !menu_state.is_open() {
         menu_state.open();
     }
 }
 
 fn open_sub_menu(action_state: Res<ActionState<MenuAction>>, mut menu_state: ResMut<SubMenu>) {
-    if action_state.just_pressed(MenuAction::OpenSubMenu) && !menu_state.is_open() {
+    if action_state.just_pressed(&MenuAction::OpenSubMenu) && !menu_state.is_open() {
         menu_state.open();
     }
 }
 
-// We want to be sure that e.g. the submenu is closed in preference to the main menu if both are open
-// If you can, use a real focus system for this logic, but workarounds of this sort are necessary in bevy_egui
+// We want to ensure that, e.g., the submenu is closed in preference to the main menu if both are open.
+// If you can, use a real focus system for this logic.
+// However, workarounds of this sort are necessary in bevy_egui
 // as it is an immediate mode UI library
 fn close_menu<M: Resource + Menu>(
     mut action_state: ResMut<ActionState<MenuAction>>,
     mut menu_status: ResMut<M>,
 ) {
-    if action_state.pressed(MenuAction::CloseWindow) && menu_status.is_open() {
+    if action_state.pressed(&MenuAction::CloseWindow) && menu_status.is_open() {
         println!("Closing the top window, as requested.");
         menu_status.close();
-        // Because the action is consumed, further systems won't see this action as pressed
+        // Because the action is consumed, further systems won't see this action as pressed,
         // and it cannot be pressed again until after the next time it would be released.
-        action_state.consume(MenuAction::CloseWindow);
+        action_state.consume(&MenuAction::CloseWindow);
     }
 }
 
 // A quick mock of some UI behavior for demonstration purposes
 mod menu_mocking {
     use bevy::prelude::Resource;
+
     pub trait Menu {
         fn is_open(&self) -> bool;
 

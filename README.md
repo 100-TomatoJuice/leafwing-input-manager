@@ -1,6 +1,7 @@
 # About
 
 [![Crates.io](https://img.shields.io/crates/v/leafwing-input-manager.svg)](https://crates.io/crates/leafwing-input-manager)
+[![docs.rs](https://img.shields.io/docsrs/leafwing-input-manager/latest)](https://docs.rs/leafwing-input-manager/latest)
 
 A straightforward but robust input-action manager for Bevy.
 
@@ -11,11 +12,22 @@ The mapping between inputs and actions is many-to-many, and easily configured an
 A single action can be triggered by multiple inputs (or set directly by UI elements or gameplay logic),
 and a single input can result in multiple actions being triggered, which can be handled contextually.
 
+## Supported Bevy Versions
+
+| Bevy | leafwing-input-manager |
+| ---- | ---------------------- |
+| 0.14 | 0.14                   |
+| 0.13 | 0.13                   |
+| 0.12 | 0.11..0.12             |
+| 0.11 | 0.10                   |
+| 0.10 | 0.9                    |
+| 0.9  | 0.7..0.8               |
+
 ## Features
 
 - Full keyboard, mouse and joystick support for button-like and axis inputs
 - Dual axis support for analog inputs from gamepads and joysticks
-- Bind arbitrary button inputs into virtual DPads
+- Bind arbitrary button inputs into virtual D-Pads
 - Effortlessly wire UI buttons to game state with one simple component!
   - When clicked, your button will press the appropriate action on the corresponding entity
 - Store all your input mappings in a single `InputMap` component
@@ -25,13 +37,13 @@ and a single input can result in multiple actions being triggered, which can be 
 - Ergonomic insertion API that seamlessly blends multiple input types for you
   - Can't decide between `input_map.insert(Action::Jump, KeyCode::Space)` and `input_map.insert(Action::Jump, GamepadButtonType::South)`? Have both!
 - Full support for arbitrary button combinations: chord your heart out.
-  - `input_map.insert_chord(Action::Console, [KeyCode::ControlLeft, KeyCode::Shift, KeyCode::C])`
+  - `input_map.insert(Action::Console, InputChord::new([KeyCode::ControlLeft, KeyCode::Shift, KeyCode::KeyC]))`
 - Sophisticated input disambiguation with the `ClashStrategy` enum: stop triggering individual buttons when you meant to press a chord!
 - Create an arbitrary number of strongly typed disjoint action sets by adding multiple copies of this plugin: decouple your camera and player state
 - Local multiplayer support: freely bind keys to distinct entities, rather than worrying about singular global state
 - Networked multiplayer support: serializable structs, and a space-conscious `ActionDiff` representation to send on the wire
 - Powerful and easy-to-use input mocking API for integration testing your Bevy applications
-  - `app.send_input(KeyCode::B)` or `world.send_input(UserInput::chord([KeyCode::B, KeyCode::E, KeyCode::V, KeyCode::Y])`
+  - `app.press_input(KeyCode::KeyB)` or `world.press_input(UserInput::chord([KeyCode::KeyB, KeyCode::KeyE, KeyCode::KeyV, KeyCode::KeyY])`
 - Control which state this plugin is active in: stop wandering around while in a menu!
 - Leafwing Studio's trademark `#![forbid(missing_docs)]`
 
@@ -76,13 +88,10 @@ enum Action {
 struct Player;
 
 fn spawn_player(mut commands: Commands) {
+    // Describes how to convert from player inputs into those actions
+    let input_map = InputMap::new([(Action::Jump, KeyCode::Space)]);
     commands
-        .spawn(InputManagerBundle::<Action> {
-            // Stores "which actions are currently pressed"
-            action_state: ActionState::default(),
-            // Describes how to convert from player inputs into those actions
-            input_map: InputMap::new([(KeyCode::Space, Action::Jump)]),
-        })
+        .spawn(InputManagerBundle::with_map(input_map))
         .insert(Player);
 }
 
@@ -90,10 +99,14 @@ fn spawn_player(mut commands: Commands) {
 fn jump(query: Query<&ActionState<Action>, With<Player>>) {
     let action_state = query.single();
     // Each action has a button-like state of its own that you can check
-    if action_state.just_pressed(Action::Jump) {
+    if action_state.just_pressed(&Action::Jump) {
         println!("I'm jumping!");
     }
 }
 ```
 
-This snippet is the `minimal.rs` example from the [`examples`](./examples) folder: check there for more in-depth learning materials!
+This snippet is the `minimal.rs` example from the [`examples`](https://github.com/Leafwing-Studios/leafwing-input-manager/tree/main/examples) folder: check there for more in-depth learning materials!
+
+## Crate Feature Flags
+
+Please refer to the `[features]` section in the [`Cargo.toml`](https://github.com/Leafwing-Studios/leafwing-input-manager/tree/main/Cargo.toml) for information about the available crate features.

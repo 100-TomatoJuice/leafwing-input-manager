@@ -1,44 +1,47 @@
-//! Contains main plugin exported by this crate.
+//! Contains the main plugin exported by this crate.
 
-use crate::action_state::{ActionData, ActionState, Timing};
-use crate::axislike::{
-    AxisType, DeadZoneShape, DualAxis, DualAxisData, MouseMotionAxisType, MouseWheelAxisType,
-    SingleAxis, VirtualAxis, VirtualDPad,
-};
-use crate::buttonlike::{MouseMotionDirection, MouseWheelDirection};
-use crate::clashing_inputs::ClashStrategy;
-use crate::dynamic_action::DynAction;
-use crate::input_map::InputMap;
-use crate::user_input::{InputKind, Modifier, UserInput};
-use crate::Actionlike;
 use core::hash::Hash;
 use core::marker::PhantomData;
 use std::fmt::Debug;
 
-use bevy::app::{App, Plugin};
+use bevy::app::{App, FixedPostUpdate, Plugin, RunFixedMainLoop};
 use bevy::ecs::prelude::*;
-use bevy::input::{ButtonState, InputSystem};
-use bevy::prelude::{PostUpdate, PreUpdate};
+use bevy::input::InputSystem;
+use bevy::prelude::{GamepadButtonType, KeyCode, PostUpdate, PreUpdate};
 use bevy::reflect::TypePath;
+use bevy::time::run_fixed_main_schedule;
 #[cfg(feature = "ui")]
 use bevy::ui::UiSystem;
 
-/// A [`Plugin`] that collects [`Input`](bevy::input::Input) from disparate sources, producing an [`ActionState`] that can be conveniently checked
+use crate::action_state::{ActionState, ButtonData};
+use crate::clashing_inputs::ClashStrategy;
+use crate::input_map::InputMap;
+use crate::input_processing::*;
+use crate::systems::{accumulate_mouse_movement, accumulate_mouse_scroll};
+#[cfg(feature = "timing")]
+use crate::timing::Timing;
+use crate::user_input::*;
+use crate::Actionlike;
+
+/// A [`Plugin`] that collects [`ButtonInput`](bevy::input::ButtonInput) from disparate sources,
+/// producing an [`ActionState`] that can be conveniently checked
 ///
 /// This plugin needs to be passed in an [`Actionlike`] enum type that you've created for your game.
 /// Each variant represents a "virtual button" whose state is stored in an [`ActionState`] struct.
 ///
 /// Each [`InputManagerBundle`](crate::InputManagerBundle) contains:
-///  - an [`InputMap`](crate::input_map::InputMap) component, which stores an entity-specific mapping between the assorted input streams and an internal representation of "actions"
-///  - an [`ActionState`] component, which stores the current input state for that entity in an source-agnostic fashion
+///  - an [`InputMap`] component, which stores an entity-specific mapping between the assorted input streams and an internal representation of "actions"
+///  - an [`ActionState`] component, which stores the current input state for that entity in a source-agnostic fashion
 ///
-/// If you have more than one distinct type of action (e.g. menu actions, camera actions and player actions), consider creating multiple `Actionlike` enums
+/// If you have more than one distinct type of action (e.g., menu actions, camera actions, and player actions),
+/// consider creating multiple `Actionlike` enums
 /// and adding a copy of this plugin for each `Actionlike` type.
 ///
-/// ## Systems
+/// All actions can be dynamically enabled or disabled by calling the relevant methods on
+/// `ActionState<A>`. This can be useful when working with states to pause the game, navigate
+/// menus, and so on.
 ///
-/// All systems added by this plugin can be dynamically enabled and disabled by setting the value of the [`ToggleActions<A>`] resource is set.
-/// This can be useful when working with states to pause the game, navigate menus or so on.
+/// ## Systems
 ///
 /// **WARNING:** These systems run during [`PreUpdate`].
 /// If you have systems that care about inputs and actions that also run during this stage,
@@ -48,10 +51,7 @@ use bevy::ui::UiSystem;
 /// Complete list:
 ///
 /// - [`tick_action_state`](crate::systems::tick_action_state), which resets the `pressed` and `just_pressed` fields of the [`ActionState`] each frame
-/// - [`update_action_state`](crate::systems::update_action_state), which collects [`Input`](bevy::input::Input) resources to update the [`ActionState`]
-/// - [`update_action_state_from_interaction`](crate::systems::update_action_state_from_interaction), for triggering actions from buttons
-///    - powers the [`ActionStateDriver`](crate::action_state::ActionStateDriver) component based on an [`Interaction`](bevy::ui::Interaction) component
-/// - [`release_on_disable`](crate::systems::release_on_disable), which resets action states when [`ToggleActions`] is flipped, to avoid persistent presses.
+/// - [`update_action_state`](crate::systems::update_action_state), which collects [`ButtonInput`](bevy::input::ButtonInput) resources to update the [`ActionState`]
 pub struct InputManagerPlugin<A: Actionlike> {
     _phantom: PhantomData<A>,
     machine: Machine,
@@ -72,7 +72,7 @@ impl<A: Actionlike> InputManagerPlugin<A> {
     ///
     /// Inputs will not be processed; instead, [`ActionState`]
     /// should be copied directly from the state provided by the client,
-    /// or constructed from [`ActionDiff`](crate::action_state::ActionDiff) event streams.
+    /// or constructed from [`ActionDiff`](crate::action_diff::ActionDiff) event streams.
     #[must_use]
     pub fn server() -> Self {
         Self {
@@ -88,32 +88,31 @@ enum Machine {
     Client,
 }
 
-impl<A: Actionlike + TypePath> Plugin for InputManagerPlugin<A> {
+impl<A: Actionlike + TypePath + bevy::reflect::GetTypeRegistration> Plugin
+    for InputManagerPlugin<A>
+{
     fn build(&self, app: &mut App) {
         use crate::systems::*;
 
         match self.machine {
             Machine::Client => {
+                // TODO: this should be part of `bevy_input`
+                if !app.is_plugin_added::<AccumulatorPlugin>() {
+                    app.add_plugins(AccumulatorPlugin);
+                }
+
+                // Main schedule
                 app.add_systems(
                     PreUpdate,
                     tick_action_state::<A>
-                        .run_if(run_if_enabled::<A>)
                         .in_set(InputManagerSystem::Tick)
                         .before(InputManagerSystem::Update),
-                )
-                .add_systems(
-                    PreUpdate,
-                    release_on_disable::<A>
-                        .in_set(InputManagerSystem::ReleaseOnDisable)
-                        .after(InputManagerSystem::Update),
                 )
                 .add_systems(PostUpdate, release_on_input_map_removed::<A>);
 
                 app.add_systems(
                     PreUpdate,
-                    update_action_state::<A>
-                        .run_if(run_if_enabled::<A>)
-                        .in_set(InputManagerSystem::Update),
+                    update_action_state::<A>.in_set(InputManagerSystem::Update),
                 );
 
                 app.configure_sets(PreUpdate, InputManagerSystem::Update.after(InputSystem));
@@ -131,7 +130,6 @@ impl<A: Actionlike + TypePath> Plugin for InputManagerPlugin<A> {
                 app.configure_sets(
                     PreUpdate,
                     InputManagerSystem::ManualControl
-                        .before(InputManagerSystem::ReleaseOnDisable)
                         .after(InputManagerSystem::Tick)
                         // Must run after the system is updated from inputs, or it will be forcibly released due to the inputs
                         // not being pressed
@@ -140,84 +138,82 @@ impl<A: Actionlike + TypePath> Plugin for InputManagerPlugin<A> {
                         .after(InputSystem),
                 );
 
-                #[cfg(feature = "ui")]
+                // FixedMain schedule
                 app.add_systems(
-                    PreUpdate,
-                    update_action_state_from_interaction::<A>
-                        .run_if(run_if_enabled::<A>)
-                        .in_set(InputManagerSystem::ManualControl),
+                    RunFixedMainLoop,
+                    (
+                        swap_to_fixed_update::<A>,
+                        // we want to update the ActionState only once, even if the FixedMain schedule runs multiple times
+                        update_action_state::<A>,
+                    )
+                        .chain()
+                        .before(run_fixed_main_schedule),
+                );
+
+                #[cfg(feature = "ui")]
+                app.configure_sets(bevy::app::FixedPreUpdate, InputManagerSystem::ManualControl);
+                app.add_systems(FixedPostUpdate, release_on_input_map_removed::<A>);
+                app.add_systems(
+                    FixedPostUpdate,
+                    tick_action_state::<A>
+                        .in_set(InputManagerSystem::Tick)
+                        .before(InputManagerSystem::Update),
+                );
+                app.add_systems(
+                    RunFixedMainLoop,
+                    swap_to_update::<A>.after(run_fixed_main_schedule),
                 );
             }
             Machine::Server => {
                 app.add_systems(
                     PreUpdate,
-                    tick_action_state::<A>
-                        .run_if(run_if_enabled::<A>)
-                        .in_set(InputManagerSystem::Tick),
+                    tick_action_state::<A>.in_set(InputManagerSystem::Tick),
                 );
             }
         };
 
-        app.register_type::<ActionState<A>>()
-            .register_type::<InputMap<A>>()
-            .register_type::<UserInput>()
-            .register_type::<InputKind>()
-            .register_type::<ActionData>()
-            .register_type::<Modifier>()
+        app.register_type::<AccumulatedMouseMovement>()
+            .register_type::<AccumulatedMouseScroll>()
             .register_type::<ActionState<A>>()
-            .register_type::<Timing>()
-            .register_type::<VirtualDPad>()
-            .register_type::<VirtualAxis>()
-            .register_type::<SingleAxis>()
-            .register_type::<DualAxis>()
-            .register_type::<AxisType>()
-            .register_type::<MouseWheelAxisType>()
-            .register_type::<MouseMotionAxisType>()
-            .register_type::<DualAxisData>()
-            .register_type::<DeadZoneShape>()
-            .register_type::<ButtonState>()
-            .register_type::<MouseWheelDirection>()
-            .register_type::<MouseMotionDirection>()
-            .register_type::<DynAction>()
+            .register_type::<InputMap<A>>()
+            .register_type::<ButtonData>()
+            .register_type::<ActionState<A>>()
+            // Inputs
+            .register_user_input::<GamepadControlDirection>()
+            .register_user_input::<GamepadControlAxis>()
+            .register_user_input::<GamepadStick>()
+            .register_user_input::<GamepadButtonType>()
+            .register_user_input::<GamepadVirtualAxis>()
+            .register_user_input::<GamepadVirtualDPad>()
+            .register_user_input::<KeyCode>()
+            .register_user_input::<ModifierKey>()
+            .register_user_input::<KeyboardVirtualAxis>()
+            .register_user_input::<KeyboardVirtualDPad>()
+            .register_user_input::<MouseMoveDirection>()
+            .register_user_input::<MouseMoveAxis>()
+            .register_user_input::<MouseMove>()
+            .register_user_input::<MouseScrollDirection>()
+            .register_user_input::<MouseScrollAxis>()
+            .register_user_input::<MouseScroll>()
+            // Processors
+            .register_type::<AxisProcessor>()
+            .register_type::<AxisBounds>()
+            .register_type::<AxisExclusion>()
+            .register_type::<AxisDeadZone>()
+            .register_type::<DualAxisProcessor>()
+            .register_type::<DualAxisInverted>()
+            .register_type::<DualAxisSensitivity>()
+            .register_type::<DualAxisBounds>()
+            .register_type::<DualAxisExclusion>()
+            .register_type::<DualAxisDeadZone>()
+            .register_type::<CircleBounds>()
+            .register_type::<CircleExclusion>()
+            .register_type::<CircleDeadZone>()
             // Resources
-            .init_resource::<ToggleActions<A>>()
             .init_resource::<ClashStrategy>();
-    }
-}
 
-/// Controls whether or not the [`ActionState`] / [`InputMap`](crate::input_map::InputMap) pairs of type `A` are active
-///
-/// If this resource does not exist, actions work normally, as if `ToggleActions::enabled == true`.
-#[derive(Resource)]
-pub struct ToggleActions<A: Actionlike> {
-    /// When this is false, [`ActionState`]'s corresponding to `A` will ignore user inputs
-    ///
-    /// When this is set to false, all corresponding [`ActionState`]s are released
-    pub enabled: bool,
-    /// Marker that stores the type of action to toggle
-    pub phantom: PhantomData<A>,
-}
-
-impl<A: Actionlike> ToggleActions<A> {
-    /// A [`ToggleActions`] in enabled state.
-    pub const ENABLED: ToggleActions<A> = ToggleActions::<A> {
-        enabled: true,
-        phantom: PhantomData::<A>,
-    };
-    /// A [`ToggleActions`] in disabled state.
-    pub const DISABLED: ToggleActions<A> = ToggleActions::<A> {
-        enabled: false,
-        phantom: PhantomData::<A>,
-    };
-}
-
-// Implement manually to not require [`Default`] for `A`
-impl<A: Actionlike> Default for ToggleActions<A> {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            phantom: PhantomData::<A>,
-        }
+        #[cfg(feature = "timing")]
+        app.register_type::<Timing>();
     }
 }
 
@@ -228,14 +224,43 @@ impl<A: Actionlike> Default for ToggleActions<A> {
 pub enum InputManagerSystem {
     /// Advances action timers.
     ///
-    /// Cleans up the state of the input manager, clearing `just_pressed` and just_released`
+    /// Cleans up the state of the input manager, clearing `just_pressed` and `just_released`
     Tick,
+    /// Accumulates various input event streams into a total delta for the frame.
+    Accumulate,
     /// Collects input data to update the [`ActionState`]
     Update,
-    /// Release all actions in all [`ActionState`]s if [`ToggleActions`] was added
-    ReleaseOnDisable,
     /// Manually control the [`ActionState`]
     ///
     /// Must run after [`InputManagerSystem::Update`] or the action state will be overridden
     ManualControl,
+}
+
+/// A plugin to handle accumulating mouse movement and scroll events.
+///
+/// This is a clearer, more reliable and more efficient approach to computing the total mouse movement and scroll for the frame.
+///
+/// This plugin is public to allow it to be used in tests: users should always have this plugin implicitly added by [`InputManagerPlugin`].
+/// Ultimately, this should be included as part of [`InputPlugin`](bevy::input::InputPlugin): see [bevy#13915](https://github.com/bevyengine/bevy/issues/13915).
+pub struct AccumulatorPlugin;
+
+impl Plugin for AccumulatorPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<AccumulatedMouseMovement>();
+        app.init_resource::<AccumulatedMouseScroll>();
+
+        // TODO: these should be part of bevy_input
+        app.add_systems(
+            PreUpdate,
+            (accumulate_mouse_movement, accumulate_mouse_scroll)
+                .in_set(InputManagerSystem::Accumulate),
+        );
+
+        app.configure_sets(
+            PreUpdate,
+            InputManagerSystem::Accumulate
+                .after(InputSystem)
+                .before(InputManagerSystem::Update),
+        );
+    }
 }

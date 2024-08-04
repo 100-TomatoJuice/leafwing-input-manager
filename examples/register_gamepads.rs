@@ -9,7 +9,7 @@ fn main() {
         .add_plugins(InputManagerPlugin::<Action>::default())
         .init_resource::<JoinedPlayers>()
         .add_systems(Update, (join, jump, disconnect))
-        .run()
+        .run();
 }
 
 #[derive(Actionlike, PartialEq, Eq, Clone, Copy, Hash, Debug, Reflect)]
@@ -32,7 +32,7 @@ fn join(
     mut commands: Commands,
     mut joined_players: ResMut<JoinedPlayers>,
     gamepads: Res<Gamepads>,
-    button_inputs: Res<Input<GamepadButton>>,
+    button_inputs: Res<ButtonInput<GamepadButton>>,
 ) {
     for gamepad in gamepads.iter() {
         // Join the game when both bumpers (L+R) on the controller are pressed
@@ -40,20 +40,18 @@ fn join(
         if button_inputs.pressed(GamepadButton::new(gamepad, GamepadButtonType::LeftTrigger))
             && button_inputs.pressed(GamepadButton::new(gamepad, GamepadButtonType::RightTrigger))
         {
-            // Make sure a player can not join twice
+            // Make sure a player cannot join twice
             if !joined_players.0.contains_key(&gamepad) {
                 println!("Player {} has joined the game!", gamepad.id);
 
+                let input_map = InputMap::new([
+                    (Action::Jump, GamepadButtonType::South),
+                    (Action::Disconnect, GamepadButtonType::Select),
+                ])
+                // Make sure to set the gamepad or all gamepads will be used!
+                .with_gamepad(gamepad);
                 let player = commands
-                    .spawn(InputManagerBundle::<Action> {
-                        action_state: ActionState::default(),
-                        input_map: InputMap::default()
-                            .insert(GamepadButtonType::South, Action::Jump)
-                            .insert(GamepadButtonType::Select, Action::Disconnect)
-                            // Make sure to set the gamepad or all gamepads will be used!
-                            .set_gamepad(gamepad)
-                            .build(),
-                    })
+                    .spawn(InputManagerBundle::with_map(input_map))
                     .insert(Player { gamepad })
                     .id();
 
@@ -68,7 +66,7 @@ fn join(
 fn jump(action_query: Query<(&ActionState<Action>, &Player)>) {
     // Iterate through each player to see if they jumped
     for (action_state, player) in action_query.iter() {
-        if action_state.just_pressed(Action::Jump) {
+        if action_state.just_pressed(&Action::Jump) {
             println!("Player {} jumped!", player.gamepad.id);
         }
     }
@@ -80,7 +78,7 @@ fn disconnect(
     mut joined_players: ResMut<JoinedPlayers>,
 ) {
     for (action_state, player) in action_query.iter() {
-        if action_state.pressed(Action::Disconnect) {
+        if action_state.pressed(&Action::Disconnect) {
             let player_entity = *joined_players.0.get(&player.gamepad).unwrap();
 
             // Despawn the disconnected player and remove them from the joined player list

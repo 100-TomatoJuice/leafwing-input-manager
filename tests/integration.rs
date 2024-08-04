@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
-use leafwing_input_manager::press_scheduler::PressScheduler;
 
 #[derive(Actionlike, Clone, Copy, Debug, Reflect, PartialEq, Eq, Hash)]
 enum Action {
@@ -17,12 +16,12 @@ fn pay_respects(
     mut respect: ResMut<Respect>,
 ) {
     if let Ok(action_state) = action_state_query.get_single() {
-        if action_state.pressed(Action::PayRespects) {
+        if action_state.pressed(&Action::PayRespects) {
             respect.0 = true;
         }
     }
     if let Some(action_state) = action_state_resource {
-        if action_state.pressed(Action::PayRespects) {
+        if action_state.pressed(&Action::PayRespects) {
             respect.0 = true;
         }
     }
@@ -43,53 +42,11 @@ struct Player;
 
 fn spawn_player(mut commands: Commands) {
     commands
-        .spawn(InputManagerBundle::<Action> {
-            input_map: InputMap::<Action>::new([(KeyCode::F, Action::PayRespects)]),
-            ..Default::default()
-        })
+        .spawn(InputManagerBundle::with_map(InputMap::new([(
+            Action::PayRespects,
+            KeyCode::KeyF,
+        )])))
         .insert(Player);
-}
-
-#[test]
-fn do_nothing() {
-    use bevy::input::InputPlugin;
-    use bevy::utils::Duration;
-
-    let mut app = App::new();
-
-    app.add_plugins(MinimalPlugins)
-        .add_plugins(InputPlugin)
-        .add_plugins(InputManagerPlugin::<Action>::default())
-        .add_systems(Startup, spawn_player)
-        .init_resource::<ActionState<Action>>()
-        .insert_resource(InputMap::<Action>::new([(KeyCode::F, Action::PayRespects)]));
-
-    app.update();
-    let action_state = app.world.resource::<ActionState<Action>>();
-    let t0 = action_state.instant_started(Action::PayRespects);
-    assert!(t0.is_some());
-    let mut duration_last_update = Duration::ZERO;
-
-    for _ in 0..3 {
-        app.update();
-        let action_state = app.world.resource::<ActionState<Action>>();
-
-        // Sanity checking state to catch wonkiness
-        assert!(!action_state.pressed(Action::PayRespects));
-        assert!(!action_state.just_pressed(Action::PayRespects));
-        assert!(action_state.released(Action::PayRespects));
-        assert!(!action_state.just_released(Action::PayRespects));
-
-        assert_eq!(action_state.instant_started(Action::PayRespects), t0);
-        assert_eq!(
-            action_state.previous_duration(Action::PayRespects),
-            Duration::ZERO
-        );
-        assert!(action_state.current_duration(Action::PayRespects) > duration_last_update);
-
-        duration_last_update = action_state.current_duration(Action::PayRespects);
-        dbg!(duration_last_update);
-    }
 }
 
 #[test]
@@ -98,38 +55,62 @@ fn disable_input() {
 
     let mut app = App::new();
 
-    // Here we spawn a player and creating a global action state to check if [`DisableInput`]
+    // Here we spawn a player and create a global action state to check if [`DisableInput`]
     // releases correctly both
     app.add_plugins(MinimalPlugins)
         .add_plugins(InputPlugin)
         .add_plugins(InputManagerPlugin::<Action>::default())
         .add_systems(Startup, spawn_player)
         .init_resource::<ActionState<Action>>()
-        .insert_resource(InputMap::<Action>::new([(KeyCode::F, Action::PayRespects)]))
+        .insert_resource(InputMap::<Action>::new([(
+            Action::PayRespects,
+            KeyCode::KeyF,
+        )]))
         .init_resource::<Respect>()
         .add_systems(Update, pay_respects)
         .add_systems(PreUpdate, respect_fades);
 
     // Press F to pay respects
-    app.send_input(KeyCode::F);
+    app.press_input(KeyCode::KeyF);
     app.update();
-    let respect = app.world.resource::<Respect>();
+    let respect = app.world().resource::<Respect>();
     assert_eq!(*respect, Respect(true));
 
-    // Disable the input
-    let mut toggle_actions = app.world.resource_mut::<ToggleActions<Action>>();
-    toggle_actions.enabled = false;
+    // Disable the global input
+    let mut action_state = app.world_mut().resource_mut::<ActionState<Action>>();
+    action_state.disable_all();
+
+    // But the player is still paying respects
+    app.update();
+    let respect = app.world().resource::<Respect>();
+    assert_eq!(*respect, Respect(true));
+
+    // Disable the player's input too
+    let mut action_state = app
+        .world_mut()
+        .query_filtered::<&mut ActionState<Action>, With<Player>>()
+        .single_mut(app.world_mut());
+    action_state.disable_all();
 
     // Now, all respect has faded
     app.update();
-    let respect = app.world.resource::<Respect>();
+    let respect = app.world().resource::<Respect>();
     assert_eq!(*respect, Respect(false));
 
     // And even pressing F cannot bring it back
-    app.send_input(KeyCode::F);
+    app.press_input(KeyCode::KeyF);
     app.update();
-    let respect = app.world.resource::<Respect>();
+    let respect = app.world().resource::<Respect>();
     assert_eq!(*respect, Respect(false));
+
+    // Re-enable the global input
+    let mut action_state = app.world_mut().resource_mut::<ActionState<Action>>();
+    action_state.enable_all();
+
+    // And it will start paying respects again
+    app.update();
+    let respect = app.world().resource::<Respect>();
+    assert_eq!(*respect, Respect(true));
 }
 
 #[test]
@@ -144,105 +125,38 @@ fn release_when_input_map_removed() {
         .add_plugins(InputManagerPlugin::<Action>::default())
         .add_systems(Startup, spawn_player)
         .init_resource::<ActionState<Action>>()
-        .insert_resource(InputMap::<Action>::new([(KeyCode::F, Action::PayRespects)]))
+        .insert_resource(InputMap::<Action>::new([(
+            Action::PayRespects,
+            KeyCode::KeyF,
+        )]))
         .init_resource::<Respect>()
         .add_systems(Update, (pay_respects, remove_input_map))
         .add_systems(PreUpdate, respect_fades);
 
     // Press F to pay respects
-    app.send_input(KeyCode::F);
+    app.press_input(KeyCode::KeyF);
     app.update();
-    let respect = app.world.resource::<Respect>();
+    let respect = app.world().resource::<Respect>();
     assert_eq!(*respect, Respect(true));
 
     // Remove the InputMap
-    app.world.remove_resource::<InputMap<Action>>();
+    app.world_mut().remove_resource::<InputMap<Action>>();
     // Needs an extra frame for the resource removed detection to release inputs
     app.update();
 
     // Now, all respect has faded
     app.update();
-    let respect = app.world.resource::<Respect>();
+    let respect = app.world().resource::<Respect>();
     assert_eq!(*respect, Respect(false));
 
     // And even pressing F cannot bring it back
-    app.send_input(KeyCode::F);
+    app.press_input(KeyCode::KeyF);
     app.update();
-    let respect = app.world.resource::<Respect>();
+    let respect = app.world().resource::<Respect>();
     assert_eq!(*respect, Respect(false));
 }
 
-#[test]
-#[cfg(feature = "ui")]
-fn action_state_driver() {
-    use bevy::input::InputPlugin;
-    use bevy::ui::Interaction;
-
-    let mut app = App::new();
-
-    #[derive(Component)]
-    struct ButtonMarker;
-
-    fn setup(mut commands: Commands) {
-        let player_entity = commands
-            .spawn(InputManagerBundle::<Action> {
-                input_map: InputMap::<Action>::new([(KeyCode::F, Action::PayRespects)]),
-                ..Default::default()
-            })
-            .insert(Player)
-            .id();
-
-        commands
-            .spawn_empty()
-            .insert(ButtonMarker)
-            .insert(Interaction::None)
-            .insert(ActionStateDriver::<Action> {
-                action: Action::PayRespects,
-                targets: player_entity.into(),
-            });
-    }
-
-    app.add_plugins(MinimalPlugins)
-        .add_plugins(InputManagerPlugin::<Action>::default())
-        .add_plugins(InputPlugin)
-        .add_systems(Startup, setup)
-        .add_systems(Update, pay_respects)
-        .add_systems(PreUpdate, respect_fades)
-        .init_resource::<Respect>();
-
-    app.update();
-
-    let respect = app.world.resource::<Respect>();
-    assert_eq!(*respect, Respect(false));
-
-    // Click button to pay respects
-    app.click_button::<ButtonMarker>();
-
-    // Verify that the button was in fact clicked
-    let mut button_query = app.world.query::<&Interaction>();
-    let interaction = button_query.iter(&app.world).next().unwrap();
-    assert_eq!(*interaction, Interaction::Pressed);
-
-    // Run the app once to process the clicks
-    app.update();
-
-    // Check the action state
-    let mut action_state_query = app.world.query::<&ActionState<Action>>();
-    let action_state = action_state_query.iter(&app.world).next().unwrap();
-    assert!(action_state.pressed(Action::PayRespects));
-
-    // Check the effects of that action state
-    let respect = app.world.resource::<Respect>();
-    assert_eq!(*respect, Respect(true));
-
-    // Clear inputs
-    app.reset_inputs();
-    app.update();
-
-    let respect = app.world.resource::<Respect>();
-    assert_eq!(*respect, Respect(false));
-}
-
+#[cfg(feature = "timing")]
 #[test]
 fn duration() {
     use bevy::input::InputPlugin;
@@ -254,9 +168,9 @@ fn duration() {
         action_state: Res<ActionState<Action>>,
         mut respect: ResMut<Respect>,
     ) {
-        if action_state.pressed(Action::PayRespects)
+        if action_state.pressed(&Action::PayRespects)
             // Unrealistically disrespectful, but makes the tests faster
-            && action_state.current_duration(Action::PayRespects) > RESPECTFUL_DURATION
+            && action_state.current_duration(&Action::PayRespects) > RESPECTFUL_DURATION
         {
             respect.0 = true;
         }
@@ -269,7 +183,10 @@ fn duration() {
         .add_plugins(InputManagerPlugin::<Action>::default())
         .add_systems(Startup, spawn_player)
         .init_resource::<ActionState<Action>>()
-        .insert_resource(InputMap::<Action>::new([(KeyCode::F, Action::PayRespects)]))
+        .insert_resource(InputMap::<Action>::new([(
+            Action::PayRespects,
+            KeyCode::KeyF,
+        )]))
         .init_resource::<Respect>()
         .add_systems(Update, hold_f_to_pay_respects);
 
@@ -277,7 +194,7 @@ fn duration() {
     app.update();
 
     // Press
-    app.send_input(KeyCode::F);
+    app.press_input(KeyCode::KeyF);
 
     // Hold
     std::thread::sleep(2 * RESPECTFUL_DURATION);
@@ -285,47 +202,7 @@ fn duration() {
     // Check
     app.update();
     assert!(app
-        .world
+        .world()
         .resource::<ActionState<Action>>()
-        .pressed(Action::PayRespects));
-}
-
-#[test]
-fn schedule_presses() {
-    use bevy::input::InputPlugin;
-
-    let mut app = App::new();
-
-    app.add_plugins(MinimalPlugins)
-        .add_plugins(InputPlugin)
-        .add_plugins(InputManagerPlugin::<Action>::default())
-        .init_resource::<ActionState<Action>>()
-        .insert_resource(InputMap::<Action>::new([(KeyCode::F, Action::PayRespects)]))
-        .init_resource::<PressScheduler<Action>>();
-
-    // Initializing
-    app.update();
-
-    // Press
-    app.world
-        .resource_mut::<PressScheduler<Action>>()
-        .schedule_press(Action::PayRespects);
-
-    assert!(app
-        .world
-        .resource::<ActionState<Action>>()
-        .released(Action::PayRespects));
-
-    // Check
-    app.update();
-    assert!(app
-        .world
-        .resource::<ActionState<Action>>()
-        .just_pressed(Action::PayRespects));
-
-    app.update();
-    assert!(app
-        .world
-        .resource::<ActionState<Action>>()
-        .just_released(Action::PayRespects));
+        .pressed(&Action::PayRespects));
 }
